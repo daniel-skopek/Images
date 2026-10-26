@@ -35,9 +35,9 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.andavin.images.image.CustomImage.UNKNOWN_CREATOR;
 import static com.andavin.util.MinecraftVersion.v1_15;
@@ -48,7 +48,7 @@ import static com.andavin.util.MinecraftVersion.v1_15;
  */
 final class DeleteCommand extends BaseCommand implements Listener {
 
-    private final Set<UUID> deleting = new HashSet<>();
+    private final Set<UUID> deleting = ConcurrentHashMap.newKeySet();
 
     DeleteCommand() {
         super("delete", "images.command.delete");
@@ -68,7 +68,7 @@ final class DeleteCommand extends BaseCommand implements Listener {
 
         UUID id = player.getUniqueId();
         this.deleting.add(id);
-        Scheduler.repeatAsyncWhile(() -> {
+        Scheduler.entityRepeatWhile(player, () -> {
 
             if (MinecraftVersion.lessThan(v1_15)) {
                 ActionBarUtil.sendActionBar(player, "§eRight Click to delete§7 - §eLeft Click to cancel");

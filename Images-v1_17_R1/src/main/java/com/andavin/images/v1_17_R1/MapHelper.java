@@ -52,6 +52,7 @@ import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.andavin.reflect.Reflection.*;
@@ -67,7 +68,7 @@ class MapHelper extends com.andavin.images.MapHelper {
     private static final Field ENTITY_ID = findField(Entity.class, "as");
     private static final EntityDataAccessor<Integer> ROTATION =
             getFieldValue(ItemFrame.class, null, "ap");
-    private static final Map<UUID, AtomicInteger> MAP_IDS = new HashMap<>(4);
+    private static final Map<UUID, AtomicInteger> MAP_IDS = new ConcurrentHashMap<>(4);
 
     @Override
     protected MapView getWorldMap(int id) {

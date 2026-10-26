@@ -53,6 +53,7 @@ import java.lang.reflect.Modifier;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.andavin.reflect.Reflection.findField;
@@ -66,7 +67,7 @@ import static java.util.Collections.emptyList;
 class MapHelper extends com.andavin.images.MapHelper {
 
     static final int DEFAULT_STARTING_ID = 1_000_000;
-    private static final Map<UUID, AtomicInteger> MAP_IDS = new HashMap<>(4);
+    private static final Map<UUID, AtomicInteger> MAP_IDS = new ConcurrentHashMap<>(4);
     private static final EntityDataAccessor<Integer> ROTATION = getFieldValue(
             findField(ItemFrame.class, 1, new FieldMatcher(EntityDataAccessor.class)
                     .require(Modifier.STATIC, Modifier.FINAL)),

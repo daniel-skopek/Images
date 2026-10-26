@@ -97,7 +97,7 @@ class PacketListener extends com.andavin.images.PacketListener<ServerboundIntera
 
             CustomImageSection section = getImageSection(mapId.id());
             if (section != null) {
-                Scheduler.sync(() -> {
+                Scheduler.entity(player, () -> {
 
                     ServerLevel world = ((CraftPlayer) player).getHandle().serverLevel();
                     MapItemSavedData map = MapItem.getSavedData(mapId, world);

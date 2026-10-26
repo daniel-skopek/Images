@@ -33,6 +33,7 @@ import com.andavin.images.image.CustomImage;
 import com.andavin.util.*;
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.apache.commons.lang.StringUtils;
@@ -90,9 +91,9 @@ public class Images extends JavaPlugin implements Listener {
     private static File imagesDirectory;
     private static DataManager dataManager;
     private static final List<CustomImage> IMAGES = new ArrayList<>();
-    private static final Map<UUID, Long> LAST_MOVE_TIMES = new HashMap<>();
+    private static final Map<UUID, Long> LAST_MOVE_TIMES = new ConcurrentHashMap<>();
     private static final PacketListener BRIDGE = Versioned.getInstance(PacketListener.class);
-    private static final Map<UUID, ImageListener> LISTENER_TASKS = new HashMap<>(4);
+    private static final Map<UUID, ImageListener> LISTENER_TASKS = new ConcurrentHashMap<>(4);
 
     @Override
     public void onLoad() {
@@ -100,7 +101,7 @@ public class Images extends JavaPlugin implements Listener {
         Logger.initialize(this.getLogger());
         imagesDirectory = this.getDataFolder();
         PacketListener.getImages = () -> IMAGES;
-        setFieldValue(Scheduler.class, null, "instance", this);
+        Scheduler.initialize(this);
         setFieldValue(TimeoutMetadata.class, null, "instance", this);
     }
 
@@ -109,13 +110,15 @@ public class Images extends JavaPlugin implements Listener {
 
         this.saveDefaultConfig();
         Bukkit.getPluginManager().registerEvents(this, this);
-        if (MinecraftVersion.isPaper()) {
+        if (MinecraftVersion.isFolia()) {
+            Logger.info("Folia detected. Using the Paper scheduler API for region-aware tasks...");
+        } else if (MinecraftVersion.isPaper()) {
             Logger.info("PaperMC server detected. Adjustments will be made to accommodate...");
         }
         // After 1.21 ProtocolLib becomes a bit unreliable. I'm disabling it for now until we see a change in updates
         // The built-in implementation seems to work fine so I don't find it worth it to deal with this at the moment
         // NOTE: this is specifically for odd errors on startup like them seeming to have removed PacketAdapter
-        if (MinecraftVersion.lessThan(MinecraftVersion.v1_21)) {
+        if (MinecraftVersion.lessThan(MinecraftVersion.v1_21) && !MinecraftVersion.isFolia()) {
 
             Plugin protocolLib = Bukkit.getPluginManager().getPlugin("ProtocolLib");
             if (protocolLib != null) { // ProtocolLib is present so use it for higher stability
@@ -160,28 +163,28 @@ public class Images extends JavaPlugin implements Listener {
         }
 
         Scheduler.laterAsync(() -> {
-            IMAGES.addAll(dataManager.load());
-            Logger.info("Loaded {} images...", IMAGES.size());
-            CommandRegistry.registerCommands();
+            List<CustomImage> loaded = dataManager.load();
+            synchronized (IMAGES) {
+                IMAGES.addAll(loaded);
+                Logger.info("Loaded {} images...", IMAGES.size());
+            }
+
+            Scheduler.sync(CommandRegistry::registerCommands);
         }, 40L);
 
         Scheduler.repeatAsync(() -> {
 
-            try {
+            long now = System.currentTimeMillis();
+            LAST_MOVE_TIMES.forEach((uuid, time) -> {
 
-                long now = System.currentTimeMillis();
-                LAST_MOVE_TIMES.forEach((uuid, time) -> {
+                if (now - time > 2500) { // More than 2.5 seconds
 
-                    if (now - time > 2500) { // More than 2.5 seconds
-
-                        Player player = Bukkit.getPlayer(uuid);
-                        if (player != null) {
-                            refreshImages(player, player.getLocation());
-                        }
+                    Player player = Bukkit.getPlayer(uuid);
+                    if (player != null) {
+                        Scheduler.entity(player, () -> refreshImages(player, player.getLocation()));
                     }
-                });
-            } catch (ConcurrentModificationException ignored) {
-            }
+                }
+            });
         }, 200, 30);
     }
 
@@ -191,8 +194,7 @@ public class Images extends JavaPlugin implements Listener {
     public void onJoin(PlayerJoinEvent event) {
 
         Player player = event.getPlayer();
-        Location location = player.getLocation();
-        Scheduler.laterAsync(() -> this.refreshImages(player, location), 20L);
+        Scheduler.entityLater(player, () -> this.refreshImages(player, player.getLocation()), 20L);
         if (protocolLib) {
             return;
         }
@@ -211,8 +213,9 @@ public class Images extends JavaPlugin implements Listener {
         };
         // If we're using Paper, attempt to delay the entity listener to prevent
         // a bug where the server does not track accurate movement after the replacement
-        if (MinecraftVersion.isPaper() && MinecraftVersion.greaterThan(MinecraftVersion.v1_20)) {
-            Scheduler.later(intercept, 20L);
+        if ((MinecraftVersion.isPaper() || MinecraftVersion.isFolia()) &&
+                MinecraftVersion.greaterThan(MinecraftVersion.v1_20)) {
+            Scheduler.entityLater(player, intercept, 20L);
         } else {
             intercept.run();
         }
@@ -241,7 +244,7 @@ public class Images extends JavaPlugin implements Listener {
 
         Player player = event.getPlayer();
         Location location = event.getRespawnLocation();
-        Scheduler.laterAsync(() -> {
+        Scheduler.entityLater(player, () -> {
 
             CustomImage[] images;
             synchronized (IMAGES) {
@@ -258,8 +261,7 @@ public class Images extends JavaPlugin implements Listener {
     @EventHandler
     public void onWorld(PlayerChangedWorldEvent event) {
         Player player = event.getPlayer();
-        Location location = player.getLocation();
-        Scheduler.laterAsync(() -> this.refreshImages(player, location), 20L);
+        Scheduler.entityLater(player, () -> this.refreshImages(player, player.getLocation()), 20L);
     }
 
     @EventHandler
@@ -273,7 +275,8 @@ public class Images extends JavaPlugin implements Listener {
 
         if (from.getBlockX() >> 4 != to.getBlockX() >> 4 ||
                 from.getBlockZ() >> 4 != to.getBlockZ() >> 4) {
-            Scheduler.async(() -> this.refreshImages(player, to));
+            Location location = to.clone();
+            Scheduler.entity(player, () -> this.refreshImages(player, location));
         }
     }
 
@@ -421,12 +424,13 @@ public class Images extends JavaPlugin implements Listener {
      */
     public static boolean addImage(CustomImage image) {
 
-        if (IMAGES.contains(image)) {
-            return false;
-        }
-
-        dataManager.save(image);
         synchronized (IMAGES) {
+
+            if (IMAGES.contains(image)) {
+                return false;
+            }
+
+            dataManager.save(image);
             IMAGES.add(image);
         }
 

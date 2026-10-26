@@ -34,10 +34,10 @@ import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -65,7 +65,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 final class CreateCommand extends BaseCommand implements Listener {
 
     private static final Pattern URL_TEST = Pattern.compile("^(https?|ftps?)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]");
-    private final Map<UUID, CreateImageTask> creating = new HashMap<>();
+    private final Map<UUID, CreateImageTask> creating = new ConcurrentHashMap<>();
 
     CreateCommand() {
         super("create", "images.command.create");
@@ -123,7 +123,7 @@ final class CreateCommand extends BaseCommand implements Listener {
 
         UUID id = player.getUniqueId();
         this.creating.put(id, new CreateImageTask(scale, imageSupplier, nameSupplier));
-        Scheduler.repeatAsyncWhile(() -> ActionBarUtil.sendActionBar(player,
+        Scheduler.entityRepeatWhile(player, () -> ActionBarUtil.sendActionBar(player,
                         "§eRight Click to place§7 - §eLeft Click to cancel"),
                 5L, 20L, () -> this.creating.containsKey(id));
     }
@@ -206,8 +206,8 @@ final class CreateCommand extends BaseCommand implements Listener {
 
                     CustomImage customImage = new CustomImage(player.getUniqueId(),
                             task.nameSupplier.get(), location, direction, image);
-                    customImage.refresh(player, playerLocation);
                     if (Images.addImage(customImage)) {
+                        Scheduler.entity(player, () -> customImage.refresh(player, player.getLocation()));
                         player.sendMessage("§aSuccessfully created image§f " + customImage.getImageName());
                     } else {
                         player.sendMessage("§cFailed to create image at that location");

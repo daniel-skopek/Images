@@ -103,7 +103,7 @@ class PacketListener extends com.andavin.images.PacketListener<ServerboundIntera
         MapId mapId = new MapId(section.getMapId());
         ItemStack item = new ItemStack(Items.FILLED_MAP);
         item.set(DataComponents.MAP_ID, mapId);
-        Scheduler.sync(() -> {
+        Scheduler.entity(player, () -> {
 
             ServerLevel world = ((CraftPlayer) player).getHandle().serverLevel();
             MapItemSavedData map = MapItem.getSavedData(mapId, world);

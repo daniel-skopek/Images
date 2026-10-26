@@ -28,6 +28,7 @@ import com.andavin.images.image.CustomImage;
 import com.andavin.images.legacy.image.LegacyImage;
 import com.andavin.images.legacy.image.LegacyImageSection;
 import com.andavin.util.Logger;
+import com.andavin.util.Scheduler;
 import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -42,6 +43,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A manager to help in importing the legacy format of
@@ -84,25 +88,9 @@ public final class LegacyImportManager {
             BlockFace direction = null;
             for (Entry<Location, LegacyImageSection> entry : legacyImage.getImageSections().entrySet()) {
 
-                Location location = entry.getKey();
-                LegacyImageSection section = entry.getValue();
-                location.getWorld().loadChunk(location.getBlockX() >> 4, location.getBlockZ() >> 4);
-                for (Entity entity : location.getWorld().getNearbyEntities(location, 1, 1, 1)) {
-
-                    if (entity instanceof ItemFrame) {
-
-                        Location loc = entity.getLocation();
-                        if (loc.getBlockX() == location.getBlockX() &&
-                                loc.getBlockY() == location.getBlockY() &&
-                                loc.getBlockZ() == location.getBlockZ()) {
-
-                            // Destroy the image
-                            entity.remove();
-                            if (direction == null) {
-                                direction = ((ItemFrame) entity).getFacing();
-                            }
-                        }
-                    }
+                BlockFace sectionDirection = destroySection(entry.getKey());
+                if (direction == null) {
+                    direction = sectionDirection;
                 }
             }
 
@@ -128,5 +116,67 @@ public final class LegacyImportManager {
         }
 
         return importedImages;
+    }
+
+    /**
+     * Remove the item frame at the given location on the region
+     * that owns it.
+     * <p>
+     * This method blocks until the region task completes, so it must
+     * never be called from the server or region thread. It is intended
+     * to be called from {@link org.bukkit.scheduler.BukkitScheduler#runTaskAsynchronously}
+     * or the Paper async scheduler.
+     *
+     * @param location The location of the legacy image section.
+     * @return The direction of the item frame that was removed, or
+     *         {@code null} if no frame was found.
+     */
+    private static BlockFace destroySection(Location location) {
+
+        CompletableFuture<BlockFace> future = new CompletableFuture<>();
+        try {
+            Scheduler.region(location, () -> {
+
+                try {
+
+                    AtomicReference<BlockFace> direction = new AtomicReference<>();
+                    location.getWorld().loadChunk(location.getBlockX() >> 4, location.getBlockZ() >> 4);
+                    for (Entity entity : location.getWorld().getNearbyEntities(location, 1, 1, 1)) {
+
+                        if (entity instanceof ItemFrame) {
+
+                            Location loc = entity.getLocation();
+                            if (loc.getBlockX() == location.getBlockX() &&
+                                    loc.getBlockY() == location.getBlockY() &&
+                                    loc.getBlockZ() == location.getBlockZ()) {
+
+                                // Destroy the image
+                                entity.remove();
+                                if (direction.get() == null) {
+                                    direction.set(((ItemFrame) entity).getFacing());
+                                }
+                            }
+                        }
+                    }
+
+                    future.complete(direction.get());
+                } catch (Throwable e) {
+                    future.completeExceptionally(e);
+                }
+            });
+        } catch (Throwable e) {
+            future.completeExceptionally(e);
+        }
+
+        try {
+            return future.get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Logger.warn(e, "Interrupted while importing legacy image at {}", location);
+        } catch (Throwable e) {
+            Logger.warn(e, "Unable to remove legacy item frame at {}", location);
+        }
+
+        return null;
     }
 }

@@ -101,7 +101,7 @@ class PacketListener extends com.andavin.images.PacketListener<ServerboundIntera
                 if (section != null) {
 
                     AtomicBoolean complete = new AtomicBoolean();
-                    Scheduler.sync(() -> {
+                    Scheduler.entity(player, () -> {
 
                         try {
 
@@ -129,6 +129,11 @@ class PacketListener extends com.andavin.images.PacketListener<ServerboundIntera
                             synchronized (complete) {
                                 complete.notify();
                             }
+                        }
+                    }, () -> {
+                        complete.set(true);
+                        synchronized (complete) {
+                            complete.notifyAll();
                         }
                     });
 

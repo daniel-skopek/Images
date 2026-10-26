@@ -38,6 +38,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.Collections.emptySet;
@@ -60,7 +61,7 @@ public class CustomImage implements Serializable {
     private final UUID creator;
     private final String imageName;
     private final BlockFace direction;
-    private final Map<Integer, CustomImageSection> sections = new HashMap<>();
+    private Map<Integer, CustomImageSection> sections = new ConcurrentHashMap<>();
 
     public CustomImage(String imageName, Location location, BlockFace direction, BufferedImage image) {
         this(UNKNOWN_CREATOR, imageName, location, direction, image);
@@ -391,9 +392,9 @@ public class CustomImage implements Serializable {
 
         in.defaultReadObject();
         this.location = readLocation(in);
-        CustomImageSection[] sections = this.sections.values().toArray(new CustomImageSection[0]);
-        this.sections.clear();
-        for (CustomImageSection section : sections) {
+        Map<Integer, CustomImageSection> sections = this.sections;
+        this.sections = new ConcurrentHashMap<>(sections.size());
+        for (CustomImageSection section : sections.values()) {
             this.sections.put(section.getFrameId(), section);
         }
     }

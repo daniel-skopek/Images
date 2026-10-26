@@ -193,6 +193,7 @@ public enum MinecraftVersion {
      */
     public static final MinecraftVersion CURRENT;
     private static final boolean PAPER;
+    private static final boolean FOLIA;
     private static final String[] PAPER_VERSION_SUFFIXES = {
         ".build", // for incremental builds of paper
         ".local" // for locally built jars
@@ -208,12 +209,33 @@ public enum MinecraftVersion {
         }
 
         PAPER = isPaper;
+        FOLIA = isFoliaServer();
         String versionString = findMajorVersion();
         try {
             CURRENT = MinecraftVersion.valueOf(versionString);
         } catch (RuntimeException e) {
             throw new UnsupportedOperationException("Version " + versionString + " is not supported.", e);
         }
+    }
+
+    private static boolean isFoliaServer() {
+
+        try {
+            Class.forName("io.papermc.paper.threadedregions.TickRegions", false,
+                    MinecraftVersion.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Determine if this server is running Folia.
+     *
+     * @return If this server is running Folia.
+     */
+    public static boolean isFolia() {
+        return FOLIA;
     }
 
     /**

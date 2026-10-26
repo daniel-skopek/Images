@@ -73,7 +73,7 @@ class PacketListener extends com.andavin.images.PacketListener<PacketPlayInUseEn
                 if (section != null) {
 
                     AtomicBoolean complete = new AtomicBoolean();
-                    Scheduler.sync(() -> {
+                    Scheduler.entity(player, () -> {
 
                         try {
                             WorldMap map = ItemWorldMap.getSavedMap(item,
@@ -88,6 +88,11 @@ class PacketListener extends com.andavin.images.PacketListener<PacketPlayInUseEn
                             synchronized (complete) {
                                 complete.notify();
                             }
+                        }
+                    }, () -> {
+                        complete.set(true);
+                        synchronized (complete) {
+                            complete.notifyAll();
                         }
                     });
 

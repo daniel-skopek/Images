@@ -109,7 +109,7 @@ public final class LegacyImage implements ConfigurationSerializable {
      */
     public void destroy() {
 
-        Scheduler.sync(() -> this.sections.forEach((loc, section) ->
+        this.sections.forEach((loc, section) -> Scheduler.region(loc, () ->
 
                 loc.getWorld().getNearbyEntities(loc, 1, 1, 1).forEach(entity -> {
 

@@ -23,9 +23,9 @@
  */
 package com.andavin.util;
 
-import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.concurrent.TimeUnit;
@@ -36,10 +36,11 @@ import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 
 /**
- * A class to make using the {@link BukkitScheduler} less
- * cumbersome and easier to use. Also, allows for easy
- * {@code do-while} loops and similar condition based looping
- * in timed loop tasks.
+ * A class to make scheduling tasks less cumbersome and easier to use.
+ * <p>
+ * On Paper and Folia, the Paper scheduler API is used so that tasks are
+ * executed on the correct thread. On older servers, the
+ * {@link org.bukkit.scheduler.BukkitScheduler} is used instead.
  *
  * @author Andavin
  * @since February 9, 2018
@@ -47,52 +48,100 @@ import java.util.function.Supplier;
 @SuppressWarnings("UnusedReturnValue")
 public final class Scheduler {
 
+    private static final String PAPER_SCHEDULER_CLASS =
+            "io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler";
     private static Plugin instance;
+    private static volatile SchedulerAdapter adapter;
 
     /**
-     * Run a task synchronously on the main thread using
-     * the {@link BukkitScheduler}.
+     * Initialize the scheduler with the owning plugin.
+     *
+     * @param plugin The plugin that owns all scheduled tasks.
+     */
+    public static void initialize(Plugin plugin) {
+        instance = plugin;
+    }
+
+    private static SchedulerAdapter adapter() {
+
+        if (adapter == null) {
+
+            if (hasPaperScheduler()) {
+
+                try {
+                    Class<?> clazz = Class.forName("com.andavin.util.PaperSchedulerAdapter",
+                            true, Scheduler.class.getClassLoader());
+                    adapter = (SchedulerAdapter) clazz.getDeclaredConstructor().newInstance();
+                } catch (Throwable e) {
+                    Logger.warn(e, "Unable to initialize the Paper scheduler API. " +
+                            "Falling back to the Bukkit scheduler.");
+                }
+            }
+
+            if (adapter == null) {
+                adapter = new BukkitSchedulerAdapter();
+            }
+        }
+
+        return adapter;
+    }
+
+    private static boolean hasPaperScheduler() {
+
+        try {
+            Class.forName(PAPER_SCHEDULER_CLASS, false, Scheduler.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Run a task synchronously on the global region using the
+     * Paper scheduler API, or on the main thread using the
+     * {@link org.bukkit.scheduler.BukkitScheduler}.
      *
      * @param run The {@link Runnable} to execute.
      * @return The {@link BukkitTask} that is returned after registering the task.
      */
     public static BukkitTask sync(Runnable run) {
-        return Bukkit.getScheduler().runTask(instance, run);
+        return adapter().sync(instance, run);
     }
 
     /**
-     * Run a task asynchronously on a separate thread using
-     * the {@link BukkitScheduler}.
+     * Run a task asynchronously on a separate thread.
      *
      * @param run The {@link Runnable} to execute.
      * @return The {@link BukkitTask} that is returned after registering the task.
      */
     public static BukkitTask async(Runnable run) {
-        return Bukkit.getScheduler().runTaskAsynchronously(instance, run);
+        return adapter().async(instance, run);
     }
 
     /**
      * Run a task synchronously after a specified amount of
-     * ticks using the {@link BukkitScheduler}.
+     * ticks using the Paper scheduler or the
+     * {@link org.bukkit.scheduler.BukkitScheduler}.
      *
      * @param run The {@link Runnable} task to execute.
      * @param delay The ticks (1 tick = 50 milliseconds, 20 ticks = 1 second) after which to run the task.
      * @return The {@link BukkitTask} that is returned after registering the task.
      */
     public static BukkitTask later(Runnable run, long delay) {
-        return Bukkit.getScheduler().runTaskLater(instance, run, delay);
+        return adapter().later(instance, run, delay);
     }
 
     /**
      * Run a task asynchronously after a specified amount of
-     * ticks using the {@link BukkitScheduler}.
+     * ticks using the Paper scheduler or the
+     * {@link org.bukkit.scheduler.BukkitScheduler}.
      *
      * @param run The {@link Runnable} task to execute.
      * @param delay The ticks (1 tick = 50 milliseconds, 20 ticks = 1 second) after which to run the task.
      * @return The {@link BukkitTask} that is returned after registering the task.
      */
     public static BukkitTask laterAsync(Runnable run, long delay) {
-        return Bukkit.getScheduler().runTaskLaterAsynchronously(instance, run, delay);
+        return adapter().laterAsync(instance, run, delay);
     }
 
     /**
@@ -105,7 +154,7 @@ public final class Scheduler {
      * @return The {@link BukkitTask} that is returned after registering the task.
      */
     public static BukkitTask repeat(Runnable run, long delay, long period) {
-        return Bukkit.getScheduler().runTaskTimer(instance, run, delay, period);
+        return adapter().repeat(instance, run, delay, period);
     }
 
     /**
@@ -118,7 +167,123 @@ public final class Scheduler {
      * @return The {@link BukkitTask} that is returned after registering the task.
      */
     public static BukkitTask repeatAsync(Runnable run, long delay, long period) {
-        return Bukkit.getScheduler().runTaskTimerAsynchronously(instance, run, delay, period);
+        return adapter().repeatAsync(instance, run, delay, period);
+    }
+
+    /**
+     * Run a task on the given entity's scheduler. On Folia this
+     * follows the entity between regions; on Paper and older
+     * servers it runs on the main thread.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entity(Entity entity, Runnable run) {
+        return entity(entity, run, null);
+    }
+
+    /**
+     * Run a task on the given entity's scheduler. On Folia this
+     * follows the entity between regions; on Paper and older
+     * servers it runs on the main thread.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute.
+     * @param retired The task to run if the entity is removed before the task runs.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entity(Entity entity, Runnable run, Runnable retired) {
+        return adapter().entity(instance, entity, run, retired);
+    }
+
+    /**
+     * Run a task on the given entity's scheduler after a delay.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute.
+     * @param delay The delay in ticks before the task runs.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entityLater(Entity entity, Runnable run, long delay) {
+        return entityLater(entity, run, null, delay);
+    }
+
+    /**
+     * Run a task on the given entity's scheduler after a delay.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute.
+     * @param retired The task to run if the entity is removed before the task runs.
+     * @param delay The delay in ticks before the task runs.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entityLater(Entity entity, Runnable run, Runnable retired, long delay) {
+        return adapter().entityLater(instance, entity, run, retired, delay);
+    }
+
+    /**
+     * Run a task repeatedly on the given entity's scheduler.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute every period.
+     * @param delay The delay in ticks before the first run of the task.
+     * @param period The period in ticks between each run.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entityRepeat(Entity entity, Runnable run, long delay, long period) {
+        return entityRepeat(entity, run, null, delay, period);
+    }
+
+    /**
+     * Run a task repeatedly on the given entity's scheduler.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute every period.
+     * @param retired The task to run if the entity is removed before the task runs.
+     * @param delay The delay in ticks before the first run of the task.
+     * @param period The period in ticks between each run.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entityRepeat(Entity entity, Runnable run,
+                                          Runnable retired, long delay, long period) {
+        return adapter().entityRepeat(instance, entity, run, retired, delay, period);
+    }
+
+    /**
+     * Run a task on the region that owns the given location.
+     *
+     * @param location The location that owns the region.
+     * @param run The {@link Runnable} task to execute.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask region(Location location, Runnable run) {
+        return adapter().region(instance, location, run);
+    }
+
+    /**
+     * Run a task on the region that owns the given location after a delay.
+     *
+     * @param location The location that owns the region.
+     * @param run The {@link Runnable} task to execute.
+     * @param delay The delay in ticks before the task runs.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask regionLater(Location location, Runnable run, long delay) {
+        return adapter().regionLater(instance, location, run, delay);
+    }
+
+    /**
+     * Run a task repeatedly on the region that owns the given location.
+     *
+     * @param location The location that owns the region.
+     * @param run The {@link Runnable} task to execute every period.
+     * @param delay The delay in ticks before the first run of the task.
+     * @param period The period in ticks between each run.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask regionRepeat(Location location, Runnable run, long delay, long period) {
+        return adapter().regionRepeat(instance, location, run, delay, period);
     }
 
     /**
@@ -205,6 +370,42 @@ public final class Scheduler {
     public static BukkitTask repeatAsyncWhile(Runnable run, long delay, long period, BooleanSupplier condition) {
         Task task = new Task(run, condition);
         BukkitTask bukkitTask = repeatAsync(task, delay, period);
+        task.setTask(bukkitTask);
+        return bukkitTask;
+    }
+
+    /**
+     * Run a task on an entity's scheduler repeatedly until the condition
+     * is no longer met.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute every period.
+     * @param delay The delay in ticks before the first run of the task.
+     * @param period The period in ticks between each run.
+     * @param condition The condition that must remain {@code true} for the task to continue.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entityRepeatWhile(Entity entity, Runnable run, long delay,
+                                               long period, BooleanSupplier condition) {
+        return entityRepeatWhile(entity, run, null, delay, period, condition);
+    }
+
+    /**
+     * Run a task on an entity's scheduler repeatedly until the condition
+     * is no longer met.
+     *
+     * @param entity The entity that owns the task.
+     * @param run The {@link Runnable} task to execute every period.
+     * @param retired The task to run if the entity is removed before the task runs.
+     * @param delay The delay in ticks before the first run of the task.
+     * @param period The period in ticks between each run.
+     * @param condition The condition that must remain {@code true} for the task to continue.
+     * @return The {@link BukkitTask task} that was scheduled.
+     */
+    public static BukkitTask entityRepeatWhile(Entity entity, Runnable run, Runnable retired, long delay,
+                                               long period, BooleanSupplier condition) {
+        Task task = new Task(run, condition);
+        BukkitTask bukkitTask = entityRepeat(entity, task, retired, delay, period);
         task.setTask(bukkitTask);
         return bukkitTask;
     }

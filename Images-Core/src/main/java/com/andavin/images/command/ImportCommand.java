@@ -26,12 +26,14 @@ package com.andavin.images.command;
 import com.andavin.images.Images;
 import com.andavin.images.image.CustomImage;
 import com.andavin.images.legacy.LegacyImportManager;
+import com.andavin.util.Logger;
 import com.andavin.util.Scheduler;
 import com.andavin.util.TimeoutMetadata;
 import org.bukkit.entity.Player;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @since September 23, 2019
@@ -41,8 +43,9 @@ public class ImportCommand extends BaseCommand {
 
     private static final String CONFIRM_META = "import-confirm";
     private static final long COOLDOWN = TimeUnit.MINUTES.toMillis(5);
+    private static final AtomicBoolean IMPORTING = new AtomicBoolean();
 
-    private long lastRun;
+    private volatile long lastRun;
 
     ImportCommand() {
         super("import", "images.command.import");
@@ -72,14 +75,33 @@ public class ImportCommand extends BaseCommand {
             return;
         }
 
+        if (!IMPORTING.compareAndSet(false, true)) {
+            player.sendMessage("§cAn import is already in progress.");
+            return;
+        }
+
         lastRun = now;
         player.sendMessage("§aImporting legacy images.\n" +
                 "§eThis will cause sever lag. Please wait...");
-        List<CustomImage> importedImages = LegacyImportManager.importImages(
-                Images.getImagesDirectory(), Images.getDataManager());
-        Scheduler.async(() -> {
-            Images.addImages(importedImages);
-            player.sendMessage("§aSuccessfully imported §f" + importedImages.size() + "§a images");
-        });
+        try {
+            Scheduler.async(() -> {
+
+                try {
+                    List<CustomImage> importedImages = LegacyImportManager.importImages(
+                            Images.getImagesDirectory(), Images.getDataManager());
+                    Images.addImages(importedImages);
+                    Scheduler.entity(player, () -> player.sendMessage(
+                            "§aSuccessfully imported §f" + importedImages.size() + "§a images"));
+                } catch (Throwable e) {
+                    Logger.severe(e);
+                    Scheduler.entity(player, () -> player.sendMessage("§cFailed to import legacy images"));
+                } finally {
+                    IMPORTING.set(false);
+                }
+            });
+        } catch (Throwable e) {
+            IMPORTING.set(false);
+            throw e;
+        }
     }
 }
