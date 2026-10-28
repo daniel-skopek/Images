@@ -220,12 +220,20 @@ public enum MinecraftVersion {
 
     private static boolean isFoliaServer() {
 
+        // Paper also ships the regionised scheduler API, so the presence
+        // of those classes is not enough to identify Folia. Use the
+        // build-info brand check documented by PaperMC when available.
         try {
-            Class.forName("io.papermc.paper.threadedregions.TickRegions", false,
-                    MinecraftVersion.class.getClassLoader());
-            return true;
-        } catch (ClassNotFoundException | LinkageError ignored) {
-            return false;
+            Class<?> buildInfoClass = Class.forName("io.papermc.paper.ServerBuildInfo");
+            Object buildInfo = buildInfoClass.getMethod("buildInfo").invoke(null);
+            Class<?> keyClass = Class.forName("net.kyori.adventure.key.Key");
+            Object foliaKey = keyClass.getMethod("key", String.class, String.class)
+                    .invoke(null, "papermc", "folia");
+            Object result = buildInfoClass.getMethod("isBrandCompatible", keyClass)
+                    .invoke(buildInfo, foliaKey);
+            return Boolean.TRUE.equals(result);
+        } catch (Throwable ignored) {
+            return Bukkit.getName().equalsIgnoreCase("Folia");
         }
     }
 

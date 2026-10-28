@@ -162,14 +162,30 @@ public class Images extends JavaPlugin implements Listener {
             dataManager.initialize();
         }
 
-        Scheduler.laterAsync(() -> {
-            List<CustomImage> loaded = dataManager.load();
-            synchronized (IMAGES) {
-                IMAGES.addAll(loaded);
-                Logger.info("Loaded {} images...", IMAGES.size());
-            }
+        // Commands do not depend on the stored images, so register them
+        // immediately rather than waiting for the database load to finish.
+        CommandRegistry.registerCommands();
 
-            Scheduler.sync(CommandRegistry::registerCommands);
+        // Loading custom images requires Bukkit world lookups (and creates
+        // the map IDs for every section). Keep this on the global/main
+        // thread so it is safe on Folia as well as on Paper and Spigot.
+        Scheduler.later(() -> {
+
+            try {
+                List<CustomImage> loaded = dataManager.load();
+                synchronized (IMAGES) {
+                    IMAGES.addAll(loaded);
+                    Logger.info("Loaded {} images...", IMAGES.size());
+                }
+
+                // Players may have joined while the images were loading.
+                // Refresh them now that the images are available.
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    Scheduler.entity(player, () -> refreshImages(player, player.getLocation()));
+                }
+            } catch (Throwable e) {
+                Logger.severe(e, "Unable to load custom images.");
+            }
         }, 40L);
 
         Scheduler.repeatAsync(() -> {
